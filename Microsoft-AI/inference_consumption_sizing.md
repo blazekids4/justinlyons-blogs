@@ -8,7 +8,6 @@
 
 **Why This Works**:
 
-- Azure OpenAI inference costs typically represent 60-80% of total AI solution spend
 - Once we understand your token consumption patterns, ancillary service sizing becomes more predictable
 - Allows us to identify optimization opportunities early in the design phase
 
