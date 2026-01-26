@@ -152,6 +152,7 @@ Once inference baseline is established, we'll size:
    - **Azure Functions/Container Apps**: Orchestration compute requirements
    - **Azure Monitor/App Insights**: Observability and logging costs
    - **Networking**: VNet, Private Link, egress estimates
+   - **others**
 
 5. **Total Solution TCO**
    - Inference (largest component)
