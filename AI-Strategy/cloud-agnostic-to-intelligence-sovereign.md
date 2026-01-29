@@ -3,7 +3,7 @@
 
 The below perspective is inspired by an interview that Microsoft CEO Satya Nadella gave to Larry Fink on January 20th, 2026 at the World Economic Forum.
 
-**Link to Interview:** [YouTube](https://www.youtube.com/watch?v=nWGk9vsQG8s)
+**Link to Interview:** <a href="https://www.youtube.com/watch?v=1co3zt3-r7I&si=rBDxcKwOQRy94BU6&start=1977" target="_blank">YouTube</a>
 
 ## Key Points
 
