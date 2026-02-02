@@ -11,6 +11,7 @@ This is a collection of articles covering various topics in technology, cloud co
 Current content includes:
 
 - **Microsoft-AI**: Articles about AI services, deployment patterns, and enterprise adoption
+  - [Agent 365 Control Plane](Microsoft-AI/agent365/agent365_controlplane.md)
 
 ## License
 

@@ -7,3 +7,5 @@ Microsoft Agent 365 is an AI-powered agent management platform designed to help 
 https://learn.microsoft.com/en-us/microsoft-agent-365/
 
 [How To Manage Agents with Agent 365](assets/documentation.pdf)
+
+[Agent 365 Control Plane](agent365_controlplane.md)
