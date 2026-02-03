@@ -26,6 +26,6 @@ This directory contains guidelines and recommended roles and responsibilities fo
 
 ## Decentralized AI Governance
 
-[Decentralized AI Agent Operating Model](Microsoft-AI/agentic-governance-roles/decentralized-fte-model/README.md)
+[Decentralized AI Agent Operating Model](decentralized-fte-model/README.md)
 
 - Simulated FTE Breakdown for Decentralized AI Agent Operating Model (8 Business Units)
