@@ -23,3 +23,9 @@ This directory contains guidelines and recommended roles and responsibilities fo
 - This guidance provides a structured framework to help organizations successfully adopt AI agents as part of their broader AI adoption strategy. It addresses the unique considerations that AI agents introduce. The series highlights Microsoft 365 agents and guidance for building custom agents using Microsoft Foundry and Microsoft Copilot Studio. It also includes strategies for designing an organization-wide data architecture to support AI agents at scale.
 
 ![alt text](assets/image2.png)
+
+## Decentralized AI Governance
+
+[Decentralized AI Agent Operating Model](Microsoft-AI/agentic-governance-roles/decentralized-fte-model/README.md)
+
+- Simulated FTE Breakdown for Decentralized AI Agent Operating Model (8 Business Units)

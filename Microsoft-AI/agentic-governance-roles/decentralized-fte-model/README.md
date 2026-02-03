@@ -1,5 +1,7 @@
 # Decentralized AI Agent Operating Model
 
+> **Note:** This document is conceptual and provided for illustrative purposes only. It is not intended as prescriptive advice or a specific recommendation. Every organization has unique needs, constraints, existing capabilities, and strategic priorities. The staffing models, role definitions, and organizational structures presented here should be adapted to fit your specific context, culture, and business requirements.
+
 ## Case for Decentralized Model
 
 Central teams struggle to scale agent development because domain context, data ownership, and integration complexity live in the BUs. Centralization increases cycle time and reduces correctness.
