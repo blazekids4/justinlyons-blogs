@@ -1,4 +1,4 @@
-# Roles & Responsiblities for Enterprise AI Governance
+# Roles & Responsibilities for Enterprise AI Governance
 
 This directory contains guidelines and recommended roles and responsibilities for governing AI agents and deployments in enterprise environments. It is intended to help organizations establish clear accountability and oversight for AI systems.
 
