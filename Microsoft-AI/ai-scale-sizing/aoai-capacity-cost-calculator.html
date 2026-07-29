@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AOAI Capacity &amp; Cost Calculator — PayGO vs PTU</title>
+<style>
+  :root{
+    --bg:#0f1420; --panel:#161d2e; --panel2:#1c2438; --border:#2a3550;
+    --text:#dce3f2; --muted:#8494b8; --accent:#4da3ff; --accent2:#7ee0a3;
+    --warn:#ffcf6b; --bad:#ff8080; --good:#7ee0a3;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px;}
+  header{padding:16px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
+  header h1{font-size:18px;margin:0;font-weight:600;}
+  header .sub{color:var(--muted);font-size:12px;}
+  .toolbar{margin-left:auto;display:flex;gap:8px;}
+  button{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 12px;cursor:pointer;font-size:13px;}
+  button:hover{border-color:var(--accent);}
+  button.primary{background:var(--accent);color:#0b1020;border-color:var(--accent);font-weight:600;}
+  button.danger:hover{border-color:var(--bad);color:var(--bad);}
+  nav{display:flex;gap:4px;padding:8px 24px 0;border-bottom:1px solid var(--border);}
+  nav .tab{padding:8px 16px;border:1px solid transparent;border-bottom:none;border-radius:8px 8px 0 0;cursor:pointer;color:var(--muted);}
+  nav .tab.active{background:var(--panel);border-color:var(--border);color:var(--text);font-weight:600;}
+  main{padding:20px 24px 60px;}
+  section.page{display:none;}
+  section.page.active{display:block;}
+  h2{font-size:15px;margin:18px 0 8px;color:var(--accent);}
+  h2:first-child{margin-top:0;}
+  .hint{color:var(--muted);font-size:12px;margin:4px 0 10px;max-width:900px;line-height:1.5;}
+  table{border-collapse:collapse;width:100%;background:var(--panel);border-radius:8px;overflow:hidden;}
+  th,td{border:1px solid var(--border);padding:6px 8px;text-align:right;white-space:nowrap;}
+  th{background:var(--panel2);font-weight:600;font-size:12px;color:var(--muted);position:sticky;top:0;}
+  td:first-child,th:first-child{text-align:left;}
+  .scroll{overflow-x:auto;margin-bottom:12px;border-radius:8px;}
+  input,select{background:#0d1322;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:13px;}
+  input[type=number],input.num{width:90px;text-align:right;}
+  input.wide{width:170px;}
+  input:focus,select:focus{outline:none;border-color:var(--accent);}
+  .est{color:var(--warn);}
+  .kpi-row{display:flex;gap:12px;flex-wrap:wrap;margin:10px 0 18px;}
+  .kpi{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 18px;min-width:170px;}
+  .kpi .label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;}
+  .kpi .value{font-size:20px;font-weight:700;margin-top:4px;}
+  .kpi .detail{color:var(--muted);font-size:11px;margin-top:2px;}
+  .good{color:var(--good);} .bad{color:var(--bad);} .warn{color:var(--warn);} .muted{color:var(--muted);}
+  .pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;border:1px solid var(--border);background:var(--panel2);}
+  .note{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--warn);border-radius:6px;padding:10px 14px;font-size:12px;color:var(--muted);margin:10px 0;max-width:1000px;line-height:1.5;}
+  .flex{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start;}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px;}
+  .rowbtn{padding:2px 8px;font-size:12px;}
+  details{margin:8px 0;} summary{cursor:pointer;color:var(--accent);font-size:13px;}
+  .helper-grid{display:grid;grid-template-columns:auto auto;gap:6px 10px;align-items:center;font-size:13px;}
+  label{color:var(--muted);font-size:12px;}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Azure OpenAI Capacity &amp; Cost Calculator</h1>
+    <div class="sub">Per-use-case RPM / TPM sizing → PayGO cost vs Provisioned Throughput (PTU) requirements</div>
+  </div>
+  <div class="toolbar">
+    <button onclick="exportJSON()">Export JSON</button>
+    <button onclick="document.getElementById('importFile').click()">Import JSON</button>
+    <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(event)">
+    <button class="danger" onclick="resetDefaults()">Reset to defaults</button>
+  </div>
+</header>
+<nav id="nav"></nav>
+<main id="main"></main>
+
+<script>
+"use strict";
+/* =========================================================================
+   ENGINE-START  (pure calculation logic — no DOM; testable in node)
+   ========================================================================= */
+const WEEKS_PER_MONTH = 365.25 / 7 / 12;      // 4.3482…
+const HOURS_PER_MONTH = 8766 / 12;            // 730.5
+const DEPLOYMENTS = ["Global", "DataZone", "Regional"];
+const DEP_LABEL = { Global: "Global", DataZone: "Data Zone", Regional: "Regional" };
+
+function periodHours(p) { return p.hoursPerDay * p.daysPerWeek * WEEKS_PER_MONTH; }
+
+function modelById(state, id) { return state.models.find(m => m.id === id); }
+
+// Effective PAYGO $/1M for a model under a deployment type (Global base × multiplier)
+function paygoPrices(state, model, dep) {
+  const mult = state.paygoMult[dep] ?? 1;
+  return {
+    input: model.inputPrice * mult,
+    cached: model.cachedPrice * mult,
+    output: model.outputPrice * mult
+  };
+}
+
+// Round exact PTUs up to the deployment's min size / increment for the model
+function roundPtus(exact, model, dep) {
+  const min = dep === "Regional" ? model.minPtuRegional : model.minPtuGlobal;
+  const inc = dep === "Regional" ? model.incPtuRegional : model.incPtuGlobal;
+  if (exact <= 0) return 0;
+  if (exact <= min) return min;
+  return min + Math.ceil((exact - min) / inc) * inc;
+}
+
+// Per-use-case calculations across all load periods
+function calcUseCase(state, uc) {
+  const model = modelById(state, uc.modelId);
+  if (!model) return null;
+  const prices = paygoPrices(state, model, uc.paygoDeployment);
+  const c = Math.min(Math.max(uc.cacheRate, 0), 1);
+  const periods = state.periods.map(p => {
+    const rpm = uc.rpm[p.id] || 0;
+    const hrs = periodHours(p);
+    const inTPM = rpm * uc.inputTokens;
+    const outTPM = rpm * uc.outputTokens;
+    const minutes = hrs * 60;
+    const inTokens = inTPM * minutes;
+    const outTokens = outTPM * minutes;
+    const cachedTokens = inTokens * c;
+    const freshTokens = inTokens - cachedTokens;
+    const cost =
+      (freshTokens * prices.input + cachedTokens * prices.cached + outTokens * prices.output) / 1e6;
+    // Normalized TPM for PTU sizing: cached input is free; output weighted by ratio
+    const normTPM = inTPM * (1 - c) + outTPM * model.outputRatio;
+    return { period: p, rpm, hrs, inTPM, outTPM, totTPM: inTPM + outTPM, inTokens, outTokens, cachedTokens, cost, normTPM };
+  });
+  const peakRPM = Math.max(0, ...periods.map(x => x.rpm));
+  const peak = periods.reduce((a, b) => (b.rpm > (a?.rpm ?? -1) ? b : a), null);
+  const monthlyCost = periods.reduce((s, x) => s + x.cost, 0);
+  const monthlyInTokens = periods.reduce((s, x) => s + x.inTokens, 0);
+  const monthlyOutTokens = periods.reduce((s, x) => s + x.outTokens, 0);
+  const monthlyCachedTokens = periods.reduce((s, x) => s + x.cachedTokens, 0);
+  const peakNormTPM = Math.max(0, ...periods.map(x => x.normTPM));
+  const exactPtus = peakNormTPM / model.inputTpmPerPtu;
+  const roundedPtus = roundPtus(exactPtus, model, uc.ptuDeployment);
+  return {
+    uc, model, prices, periods, peakRPM, peak, monthlyCost,
+    monthlyInTokens, monthlyOutTokens, monthlyCachedTokens,
+    peakInTPM: peak ? peak.inTPM : 0, peakOutTPM: peak ? peak.outTPM : 0,
+    peakTotTPM: peak ? peak.totTPM : 0, peakNormTPM, exactPtus, roundedPtus
+  };
+}
+
+// PTU cost for N units under a deployment type, per billing mode, per month
+function ptuMonthlyCost(state, dep, ptus, billing) {
+  const r = state.ptuRates[dep];
+  if (billing === "hourly") return ptus * r.hourly * HOURS_PER_MONTH;
+  if (billing === "monthly") return ptus * r.monthly;
+  return ptus * r.yearly / 12; // yearly reservation, amortized per month
+}
+
+// Group use cases by model + PTU deployment type (a PTU deployment serves one model)
+function calcGroups(state, results) {
+  const map = new Map();
+  for (const r of results) {
+    if (!r) continue;
+    const key = r.model.id + "||" + r.uc.ptuDeployment;
+    if (!map.has(key)) map.set(key, { model: r.model, dep: r.uc.ptuDeployment, items: [] });
+    map.get(key).items.push(r);
+  }
+  const groups = [];
+  for (const g of map.values()) {
+    // sum normalized TPM per period (assumes coincident peaks — conservative)
+    const perPeriod = state.periods.map(p => {
+      let norm = 0, tot = 0, hrs = 0;
+      for (const r of g.items) {
+        const pp = r.periods.find(x => x.period.id === p.id);
+        if (pp) { norm += pp.normTPM; tot += pp.totTPM; hrs = pp.hrs; }
+      }
+      return { period: p, normTPM: norm, totTPM: tot, hrs };
+    });
+    const peakNormTPM = Math.max(0, ...perPeriod.map(x => x.normTPM));
+    const peakTotTPM = Math.max(0, ...perPeriod.map(x => x.totTPM));
+    const exactPtus = peakNormTPM / g.model.inputTpmPerPtu;
+    const roundedPtus = roundPtus(exactPtus, g.model, g.dep);
+    const capacityNormTPM = roundedPtus * g.model.inputTpmPerPtu;
+    // utilization: normalized token-minutes used / capacity token-minutes over the month
+    const usedTokenMin = perPeriod.reduce((s, x) => s + x.normTPM * x.hrs * 60, 0);
+    const capTokenMin = capacityNormTPM * HOURS_PER_MONTH * 60;
+    const utilization = capTokenMin > 0 ? usedTokenMin / capTokenMin : 0;
+    const paygoCost = g.items.reduce((s, r) => s + r.monthlyCost, 0);
+    const costs = {
+      hourly: ptuMonthlyCost(state, g.dep, roundedPtus, "hourly"),
+      monthly: ptuMonthlyCost(state, g.dep, roundedPtus, "monthly"),
+      yearly: ptuMonthlyCost(state, g.dep, roundedPtus, "yearly")
+    };
+    groups.push({ ...g, perPeriod, peakNormTPM, peakTotTPM, exactPtus, roundedPtus, utilization, paygoCost, costs });
+  }
+  return groups;
+}
+/* ENGINE-END ============================================================= */
+
+/* ------------------------- default data (July 2026) --------------------- */
+function defaultState() {
+  let mid = 0, pid = 0, uid = 0;
+  const M = (name, tpm, ratio, minG, incG, minR, incR, inP, cachedP, outP, est) =>
+    ({ id: "m" + (++mid), name, inputTpmPerPtu: tpm, outputRatio: ratio,
+       minPtuGlobal: minG, incPtuGlobal: incG, minPtuRegional: minR, incPtuRegional: incR,
+       inputPrice: inP, cachedPrice: cachedP, outputPrice: outP, estimated: !!est });
+  return {
+    version: 1,
+    // $/PTU rates by deployment type. hourly = $/PTU/hr; monthly & yearly = reservation $/PTU/term.
+    ptuRates: {
+      Global:   { hourly: 1.00, monthly: 260.00, yearly: 2652.00 },
+      DataZone: { hourly: 1.10, monthly: 286.00, yearly: 2916.60 },
+      Regional: { hourly: 2.00, monthly: 520.00, yearly: 5304.00 }
+    },
+    // PAYGO price multiplier vs Global Standard base prices
+    paygoMult: { Global: 1.00, DataZone: 1.10, Regional: 1.20 },
+    models: [
+      M("gpt-5.5",      1200, 6, 15, 5, 50, 50, 5.00, 0.50,  30.00),
+      M("gpt-5.4",      2400, 6, 15, 5, 50, 50, 2.50, 0.25,  15.00),
+      M("gpt-5.4-mini", 7900, 8, 15, 5, 25, 25, 0.45, 0.045,  3.60, true),
+      M("gpt-5.2",      3400, 8, 15, 5, 50, 50, 1.75, 0.175, 14.00),
+      M("gpt-5.1",      4750, 8, 15, 5, 50, 50, 1.25, 0.125, 10.00, true),
+      M("gpt-5",        4750, 8, 15, 5, 50, 50, 1.25, 0.125, 10.00),
+      M("gpt-5-mini",  23750, 8, 15, 5, 25, 25, 0.25, 0.025,  2.00),
+      M("gpt-4.1",      3000, 4, 15, 5, 50, 50, 2.00, 0.50,   8.00),
+      M("gpt-4.1-mini",14900, 4, 15, 5, 25, 25, 0.40, 0.10,   1.60),
+      M("gpt-4.1-nano",59400, 4, 15, 5, 25, 25, 0.10, 0.025,  0.40),
+      M("gpt-4o",       2500, 4, 15, 5, 50, 50, 2.50, 1.25,  10.00),
+      M("gpt-4o-mini", 37000, 4, 15, 5, 25, 25, 0.15, 0.075,  0.60),
+      M("o3",           3000, 4, 15, 5, 50, 50, 2.00, 0.50,   8.00),
+      M("o4-mini",      5400, 4, 15, 5, 25, 25, 1.10, 0.275,  4.40)
+    ],
+    periods: [
+      { id: "p" + (++pid), name: "Weekday — Business Hours", hoursPerDay: 10, daysPerWeek: 5 },
+      { id: "p" + (++pid), name: "Weekday — Off-Peak",       hoursPerDay: 14, daysPerWeek: 5 },
+      { id: "p" + (++pid), name: "Weekend — Whole Day",      hoursPerDay: 24, daysPerWeek: 2 }
+    ],
+    useCases: [
+      { id: "u" + (++uid), name: "RAG Chat", modelId: "m6", paygoDeployment: "Global", ptuDeployment: "Global",
+        inputTokens: 3500, outputTokens: 300, cacheRate: 0.30, rpm: { p1: 75, p2: 10, p3: 10 } },
+      { id: "u" + (++uid), name: "Summarization", modelId: "m6", paygoDeployment: "Global", ptuDeployment: "Global",
+        inputTokens: 5000, outputTokens: 300, cacheRate: 0.10, rpm: { p1: 75, p2: 10, p3: 10 } },
+      { id: "u" + (++uid), name: "Classification", modelId: "m7", paygoDeployment: "Global", ptuDeployment: "Global",
+        inputTokens: 3800, outputTokens: 10, cacheRate: 0.50, rpm: { p1: 75, p2: 10, p3: 10 } }
+    ],
+    ptuBilling: "monthly"
+  };
+}
+
+/* ----------------------------- state mgmt ------------------------------- */
+const LS_KEY = "aoai-capacity-calc-v1";
+let state = load();
+function load() {
+  try { const s = JSON.parse(localStorage.getItem(LS_KEY)); if (s && s.models) return s; } catch (e) {}
+  return defaultState();
+}
+function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {} }
+function resetDefaults() {
+  if (confirm("Discard all inputs and restore defaults?")) { state = defaultState(); save(); render(); }
+}
+function exportJSON() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "aoai-sizing-" + new Date().toISOString().slice(0, 10) + ".json";
+  a.click();
+}
+function importJSON(ev) {
+  const f = ev.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try { const s = JSON.parse(r.result); if (!s.models || !s.useCases) throw 0; state = s; save(); render(); }
+    catch (e) { alert("Not a valid export file."); }
+  };
+  r.readAsText(f); ev.target.value = "";
+}
+
+/* ------------------------------ formatting ------------------------------ */
+const fmt$ = n => "$" + n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+const fmt$2 = n => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtN = (n, d = 0) => n.toLocaleString("en-US", { maximumFractionDigits: d });
+const fmtBig = n => n >= 1e9 ? fmtN(n / 1e9, 2) + "B" : n >= 1e6 ? fmtN(n / 1e6, 1) + "M" : n >= 1e3 ? fmtN(n / 1e3, 1) + "K" : fmtN(n);
+const fmtPct = n => (n * 100).toLocaleString("en-US", { maximumFractionDigits: 1 }) + "%";
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* -------------------------- generic edit binding ------------------------ */
+function upd(path, value, isNum) {
+  const keys = path.split(".");
+  let o = state;
+  for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
+  o[keys[keys.length - 1]] = isNum ? (parseFloat(value) || 0) : value;
+  save(); renderResultsOnly();
+}
+// find array items by id
+function model(id) { return state.models.find(m => m.id === id); }
+function period(id) { return state.periods.find(p => p.id === id); }
+function useCase(id) { return state.useCases.find(u => u.id === id); }
+
+/* ------------------------------- tabs ----------------------------------- */
+const TABS = [
+  ["results", "📊 Results"],
+  ["usecases", "🧩 Use Cases"],
+  ["periods", "🕑 Load Periods"],
+  ["catalog", "⚙️ Models & Pricing"]
+];
+let activeTab = "usecases";
+function setTab(t) { activeTab = t; render(); }
+
+/* ------------------------------ renderers ------------------------------- */
+function render() {
+  document.getElementById("nav").innerHTML = TABS.map(([k, label]) =>
+    `<div class="tab ${k === activeTab ? "active" : ""}" onclick="setTab('${k}')">${label}</div>`).join("");
+  const main = document.getElementById("main");
+  main.innerHTML = `
+    <section class="page ${activeTab === "catalog" ? "active" : ""}" id="pg-catalog">${renderCatalog()}</section>
+    <section class="page ${activeTab === "periods" ? "active" : ""}" id="pg-periods">${renderPeriods()}</section>
+    <section class="page ${activeTab === "usecases" ? "active" : ""}" id="pg-usecases">${renderUseCases()}</section>
+    <section class="page ${activeTab === "results" ? "active" : ""}" id="pg-results">${renderResults()}</section>`;
+}
+function renderResultsOnly() {
+  const el = document.getElementById("pg-results");
+  if (el) el.innerHTML = renderResults();
+}
+
+/* ---- catalog tab ---- */
+function renderCatalog() {
+  const rateRow = dep => {
+    const r = state.ptuRates[dep];
+    return `<tr><td>${DEP_LABEL[dep]} Provisioned</td>
+      <td><input class="num" type="number" step="0.01" value="${r.hourly}" onchange="upd('ptuRates.${dep}.hourly',this.value,1)"></td>
+      <td><input class="num" type="number" step="0.01" value="${r.monthly}" onchange="upd('ptuRates.${dep}.monthly',this.value,1)"></td>
+      <td><input class="num" type="number" step="0.01" value="${r.yearly}" onchange="upd('ptuRates.${dep}.yearly',this.value,1)"></td>
+      <td class="muted">${fmt$2(r.yearly / 12)}/PTU/mo effective</td></tr>`;
+  };
+  const multRow = dep => `<tr><td>${DEP_LABEL[dep]} Standard</td>
+      <td><input class="num" type="number" step="0.01" value="${state.paygoMult[dep]}" onchange="upd('paygoMult.${dep}',this.value,1)"></td></tr>`;
+  const mRows = state.models.map(m => `<tr>
+      <td><input class="wide" value="${esc(m.name)}" onchange="updModel('${m.id}','name',this.value)">${m.estimated ? ' <span class="est" title="Pricing estimated — verify against the Azure pricing calculator">⚠ est.</span>' : ""}</td>
+      <td><input class="num" type="number" value="${m.inputTpmPerPtu}" onchange="updModel('${m.id}','inputTpmPerPtu',this.value,1)"></td>
+      <td><input class="num" type="number" step="0.1" value="${m.outputRatio}" onchange="updModel('${m.id}','outputRatio',this.value,1)"></td>
+      <td><input class="num" type="number" value="${m.minPtuGlobal}" onchange="updModel('${m.id}','minPtuGlobal',this.value,1)"></td>
+      <td><input class="num" type="number" value="${m.incPtuGlobal}" onchange="updModel('${m.id}','incPtuGlobal',this.value,1)"></td>
+      <td><input class="num" type="number" value="${m.minPtuRegional}" onchange="updModel('${m.id}','minPtuRegional',this.value,1)"></td>
+      <td><input class="num" type="number" value="${m.incPtuRegional}" onchange="updModel('${m.id}','incPtuRegional',this.value,1)"></td>
+      <td><input class="num" type="number" step="0.001" value="${m.inputPrice}" onchange="updModel('${m.id}','inputPrice',this.value,1)"></td>
+      <td><input class="num" type="number" step="0.001" value="${m.cachedPrice}" onchange="updModel('${m.id}','cachedPrice',this.value,1)"></td>
+      <td><input class="num" type="number" step="0.001" value="${m.outputPrice}" onchange="updModel('${m.id}','outputPrice',this.value,1)"></td>
+      <td><button class="rowbtn danger" onclick="delModel('${m.id}')">✕</button></td></tr>`).join("");
+  return `
+  <h2>Model catalog</h2>
+  <div class="hint">This is the "plug in required metrics" section. Every value is editable and drives the calculators.
+    <b>Input TPM per PTU</b> and <b>output ratio</b> come from the Microsoft PTU sizing docs; PAYGO prices are Global Standard $ per 1M tokens.
+    Output ratio = how many input tokens one output token counts as toward PTU utilization (matches the output/input price ratio for gpt-4.1+).</div>
+  <div class="scroll"><table>
+    <tr><th>Model</th><th>Input TPM / PTU</th><th>Output ratio</th><th>Min PTU (Glbl/DZ)</th><th>Incr (Glbl/DZ)</th>
+        <th>Min PTU (Rgnl)</th><th>Incr (Rgnl)</th><th>Input $/1M</th><th>Cached $/1M</th><th>Output $/1M</th><th></th></tr>
+    ${mRows}
+  </table></div>
+  <button onclick="addModel()">＋ Add model</button>
+
+  <h2>PTU rates ($ per PTU)</h2>
+  <div class="hint">Hourly = on-demand $/PTU/hr. Monthly / Yearly = Azure reservation price per PTU per term. Yearly is amortized to a monthly equivalent in results.</div>
+  <div class="scroll" style="max-width:760px"><table>
+    <tr><th>Deployment type</th><th>Hourly $/PTU/hr</th><th>Monthly resv $/PTU</th><th>Yearly resv $/PTU</th><th></th></tr>
+    ${DEPLOYMENTS.map(rateRow).join("")}
+  </table></div>
+
+  <h2>PAYGO price multiplier by deployment type</h2>
+  <div class="hint">PAYGO prices above are Global Standard. Data Zone and Regional Standard typically carry an uplift (~10% each step; Microsoft applies a 10% Regional uplift for models released after Mar 2026). Adjust to match the pricing calculator for your region.</div>
+  <div class="scroll" style="max-width:420px"><table>
+    <tr><th>Deployment type</th><th>× multiplier</th></tr>
+    ${DEPLOYMENTS.map(multRow).join("")}
+  </table></div>
+
+  <div class="note">⚠ Rates seeded July 2026 from Microsoft Learn PTU sizing docs and the Azure pricing page. PTU reservation rates and model prices change — verify against the
+    <b>Azure pricing calculator</b> and <b>Foundry capacity calculator</b> before committing. Rows marked ⚠ est. are estimates.</div>`;
+}
+function updModel(id, k, v, isNum) { const m = model(id); m[k] = isNum ? (parseFloat(v) || 0) : v; save(); renderResultsOnly(); }
+function addModel() {
+  const id = "m" + Date.now();
+  state.models.push({ id, name: "new-model", inputTpmPerPtu: 3000, outputRatio: 4, minPtuGlobal: 15, incPtuGlobal: 5,
+    minPtuRegional: 50, incPtuRegional: 50, inputPrice: 1, cachedPrice: 0.1, outputPrice: 4, estimated: true });
+  save(); render();
+}
+function delModel(id) {
+  if (state.useCases.some(u => u.modelId === id)) { alert("A use case still references this model."); return; }
+  state.models = state.models.filter(m => m.id !== id); save(); render();
+}
+
+/* ---- periods tab ---- */
+function renderPeriods() {
+  const rows = state.periods.map(p => `<tr>
+    <td><input class="wide" value="${esc(p.name)}" onchange="updPeriod('${p.id}','name',this.value)"></td>
+    <td><input class="num" type="number" step="0.5" value="${p.hoursPerDay}" onchange="updPeriod('${p.id}','hoursPerDay',this.value,1)"></td>
+    <td><input class="num" type="number" step="1" value="${p.daysPerWeek}" onchange="updPeriod('${p.id}','daysPerWeek',this.value,1)"></td>
+    <td>${fmtN(p.hoursPerDay * p.daysPerWeek, 1)}</td>
+    <td>${fmtN(periodHours(p), 1)}</td>
+    <td><button class="rowbtn danger" onclick="delPeriod('${p.id}')">✕</button></td></tr>`).join("");
+  const tot = state.periods.reduce((s, p) => s + periodHours(p), 0);
+  return `
+  <h2>Load periods</h2>
+  <div class="hint">Define when traffic occurs. Each use case gets an RPM per period; the busiest period drives peak TPM and PTU sizing, while all periods contribute to monthly volume and PAYGO cost. Hours/month uses ${WEEKS_PER_MONTH.toFixed(3)} weeks per month.</div>
+  <div class="scroll" style="max-width:820px"><table>
+    <tr><th>Name</th><th>Hours / day</th><th>Days / week</th><th>Hours / week</th><th>Hours / month</th><th></th></tr>
+    ${rows}
+    <tr><td class="muted">Total coverage</td><td></td><td></td><td></td><td class="${Math.abs(tot - HOURS_PER_MONTH) > 1 ? "warn" : "good"}">${fmtN(tot, 1)} / ${fmtN(HOURS_PER_MONTH, 1)}</td><td></td></tr>
+  </table></div>
+  <button onclick="addPeriod()">＋ Add period</button>
+  <div class="note">Tip: periods should sum to ~${fmtN(HOURS_PER_MONTH, 1)} h/month for a full-coverage forecast. A ${'⚠'} total means gaps or overlaps (fine if intentional, e.g. you only model business hours).</div>`;
+}
+function updPeriod(id, k, v, isNum) { const p = period(id); p[k] = isNum ? (parseFloat(v) || 0) : v; save(); render(); }
+function addPeriod() {
+  const id = "p" + Date.now();
+  state.periods.push({ id, name: "New period", hoursPerDay: 8, daysPerWeek: 5 });
+  state.useCases.forEach(u => { if (!(id in u.rpm)) u.rpm[id] = 0; });
+  save(); render();
+}
+function delPeriod(id) {
+  state.periods = state.periods.filter(p => p.id !== id);
+  state.useCases.forEach(u => delete u.rpm[id]);
+  save(); render();
+}
+
+/* ---- use cases tab ---- */
+function renderUseCases() {
+  const modelOpts = sel => state.models.map(m => `<option value="${m.id}" ${m.id === sel ? "selected" : ""}>${esc(m.name)}</option>`).join("");
+  const depOpts = sel => DEPLOYMENTS.map(d => `<option value="${d}" ${d === sel ? "selected" : ""}>${DEP_LABEL[d]}</option>`).join("");
+  const rows = state.useCases.map(u => `<tr>
+    <td><input class="wide" value="${esc(u.name)}" onchange="updUC('${u.id}','name',this.value)"></td>
+    <td><select onchange="updUC('${u.id}','modelId',this.value)">${modelOpts(u.modelId)}</select></td>
+    <td><select onchange="updUC('${u.id}','paygoDeployment',this.value)">${depOpts(u.paygoDeployment)}</select></td>
+    <td><select onchange="updUC('${u.id}','ptuDeployment',this.value)">${depOpts(u.ptuDeployment)}</select></td>
+    <td><input class="num" type="number" value="${u.inputTokens}" onchange="updUC('${u.id}','inputTokens',this.value,1)"></td>
+    <td><input class="num" type="number" value="${u.outputTokens}" onchange="updUC('${u.id}','outputTokens',this.value,1)"></td>
+    <td><input class="num" type="number" step="1" min="0" max="100" value="${Math.round(u.cacheRate * 100)}" onchange="updUC('${u.id}','cacheRatePct',this.value,1)"></td>
+    ${state.periods.map(p => `<td><input class="num" type="number" step="0.1" value="${u.rpm[p.id] || 0}" onchange="updUCrpm('${u.id}','${p.id}',this.value)"></td>`).join("")}
+    <td><button class="rowbtn" title="Duplicate" onclick="dupUC('${u.id}')">⧉</button>
+        <button class="rowbtn danger" onclick="delUC('${u.id}')">✕</button></td></tr>`).join("");
+  return `
+  <h2>Use cases</h2>
+  <div class="hint">One row per use case. <b>PayGO deployment</b> sets token pricing (Standard tiers); <b>PTU deployment</b> sets which provisioned pool it would join.
+    Cache rate = % of input tokens served from prompt cache (billed at the cached rate on PAYGO; deducted 100% from PTU utilization). Enter average RPM sustained during each load period.</div>
+  <div class="scroll"><table>
+    <tr><th>Use case</th><th>Model</th><th>PayGO deploy</th><th>PTU deploy</th><th>Input tok/req</th><th>Output tok/req</th><th>Cache %</th>
+    ${state.periods.map(p => `<th>${esc(p.name)}<br>RPM</th>`).join("")}<th></th></tr>
+    ${rows}
+  </table></div>
+  <button class="primary" onclick="addUC()">＋ Add use case</button>
+
+  <details><summary>RPM helper — derive RPM from user activity</summary>
+    <div class="card" style="max-width:520px;margin-top:8px">
+      <div class="helper-grid">
+        <label>Total users</label><input class="num" type="number" id="h_users" value="5000">
+        <label>Active during peak %</label><input class="num" type="number" id="h_active" value="25">
+        <label>Sessions per user per day</label><input class="num" type="number" id="h_sessions" value="3">
+        <label>Requests per session</label><input class="num" type="number" id="h_reqs" value="15">
+        <label>Usage window (hours/day)</label><input class="num" type="number" id="h_window" value="9">
+      </div>
+      <div style="margin-top:10px"><button onclick="calcHelper()">Calculate</button>
+      <span id="h_out" style="margin-left:12px;font-weight:600"></span></div>
+      <div class="hint">RPM = (users × active% × sessions × requests) ÷ window minutes</div>
+    </div>
+  </details>`;
+}
+function updUC(id, k, v, isNum) {
+  const u = useCase(id);
+  if (k === "cacheRatePct") { u.cacheRate = Math.min(Math.max((parseFloat(v) || 0) / 100, 0), 1); }
+  else u[k] = isNum ? (parseFloat(v) || 0) : v;
+  save(); renderResultsOnly();
+}
+function updUCrpm(id, pid, v) { useCase(id).rpm[pid] = parseFloat(v) || 0; save(); renderResultsOnly(); }
+function addUC() {
+  const id = "u" + Date.now();
+  const rpm = {}; state.periods.forEach(p => rpm[p.id] = 0);
+  state.useCases.push({ id, name: "New use case", modelId: state.models[0].id, paygoDeployment: "Global",
+    ptuDeployment: "Global", inputTokens: 1000, outputTokens: 250, cacheRate: 0, rpm });
+  save(); render();
+}
+function dupUC(id) {
+  const u = useCase(id);
+  const copy = JSON.parse(JSON.stringify(u));
+  copy.id = "u" + Date.now(); copy.name = u.name + " (copy)";
+  state.useCases.splice(state.useCases.indexOf(u) + 1, 0, copy);
+  save(); render();
+}
+function delUC(id) { state.useCases = state.useCases.filter(u => u.id !== id); save(); render(); }
+function calcHelper() {
+  const g = id => parseFloat(document.getElementById(id).value) || 0;
+  const rpm = (g("h_users") * g("h_active") / 100 * g("h_sessions") * g("h_reqs")) / (g("h_window") * 60);
+  document.getElementById("h_out").textContent = "≈ " + rpm.toFixed(1) + " RPM";
+}
+
+/* ---- results tab ---- */
+function renderResults() {
+  const results = state.useCases.map(u => calcUseCase(state, u)).filter(Boolean);
+  if (!results.length) return `<div class="hint">Add a use case to see results.</div>`;
+  const groups = calcGroups(state, results);
+  const billing = state.ptuBilling;
+
+  const totPaygo = results.reduce((s, r) => s + r.monthlyCost, 0);
+  const totPtu = groups.reduce((s, g) => s + g.costs[billing], 0);
+  const totMix = groups.reduce((s, g) => s + Math.min(g.paygoCost, g.costs[billing]), 0);
+  const totTokens = results.reduce((s, r) => s + r.monthlyInTokens + r.monthlyOutTokens, 0);
+  const totPtus = groups.reduce((s, g) => s + g.roundedPtus, 0);
+
+  const ucRows = results.map(r => `<tr>
+    <td>${esc(r.uc.name)}</td>
+    <td>${esc(r.model.name)} <span class="pill">${DEP_LABEL[r.uc.paygoDeployment]}</span></td>
+    <td>${fmtN(r.peakRPM, 1)}</td>
+    <td>${fmtBig(r.peakInTPM)}</td>
+    <td>${fmtBig(r.peakOutTPM)}</td>
+    <td>${fmtBig(r.peakTotTPM)}</td>
+    <td>${fmtBig(r.peakNormTPM)}</td>
+    <td>${fmtBig(r.monthlyInTokens)}</td>
+    <td>${fmtBig(r.monthlyOutTokens)}</td>
+    <td>${fmtPct(r.uc.cacheRate)}</td>
+    <td>${fmtN(r.exactPtus, 1)}</td>
+    <td><b>${fmt$(r.monthlyCost)}</b></td></tr>`).join("");
+
+  const grpRows = groups.map(g => {
+    const ptuCost = g.costs[billing];
+    const cheaper = ptuCost <= g.paygoCost;
+    const delta = g.paygoCost > 0 ? (ptuCost - g.paygoCost) / g.paygoCost : 0;
+    return `<tr>
+    <td>${esc(g.model.name)} <span class="pill">${DEP_LABEL[g.dep]} PTU</span></td>
+    <td>${g.items.length}</td>
+    <td>${fmtBig(g.peakTotTPM)}</td>
+    <td>${fmtBig(g.peakNormTPM)}</td>
+    <td>${fmtN(g.exactPtus, 1)}</td>
+    <td><b>${fmtN(g.roundedPtus)}</b></td>
+    <td>${fmtPct(g.utilization)}</td>
+    <td>${fmt$(g.paygoCost)}</td>
+    <td>${fmt$(g.costs.hourly)}</td>
+    <td>${fmt$(g.costs.monthly)}</td>
+    <td>${fmt$(g.costs.yearly)}</td>
+    <td class="${cheaper ? "good" : "bad"}">${cheaper ? "PTU" : "PayGO"} ${delta !== 0 ? "(" + (delta > 0 ? "+" : "") + fmtPct(delta) + ")" : ""}</td></tr>`;
+  }).join("");
+
+  const perUcPeriod = results.map(r => `
+    <details><summary>${esc(r.uc.name)} — period detail</summary>
+    <div class="scroll" style="margin-top:6px"><table>
+      <tr><th>Period</th><th>RPM</th><th>Hrs/mo</th><th>Input TPM</th><th>Output TPM</th><th>Norm. TPM (PTU)</th>
+          <th>Input tok/mo</th><th>Cached tok/mo</th><th>Output tok/mo</th><th>PayGO cost</th></tr>
+      ${r.periods.map(p => `<tr><td>${esc(p.period.name)}</td><td>${fmtN(p.rpm, 1)}</td><td>${fmtN(p.hrs, 1)}</td>
+        <td>${fmtBig(p.inTPM)}</td><td>${fmtBig(p.outTPM)}</td><td>${fmtBig(p.normTPM)}</td>
+        <td>${fmtBig(p.inTokens)}</td><td>${fmtBig(p.cachedTokens)}</td><td>${fmtBig(p.outTokens)}</td>
+        <td>${fmt$2(p.cost)}</td></tr>`).join("")}
+    </table></div></details>`).join("");
+
+  return `
+  <h2>Aggregate summary</h2>
+  <div class="kpi-row">
+    <div class="kpi"><div class="label">100% PayGO / month</div><div class="value">${fmt$(totPaygo)}</div>
+      <div class="detail">${fmtBig(totTokens)} tokens/mo</div></div>
+    <div class="kpi"><div class="label">100% PTU / month</div><div class="value">${fmt$(totPtu)}</div>
+      <div class="detail">${fmtN(totPtus)} PTUs @ ${billing} rate</div></div>
+    <div class="kpi"><div class="label">Optimized mix / month</div><div class="value good">${fmt$(totMix)}</div>
+      <div class="detail">cheaper option per model+deployment</div></div>
+    <div class="kpi"><div class="label">PTU vs PayGO</div>
+      <div class="value ${totPtu <= totPaygo ? "good" : "bad"}">${totPaygo > 0 ? (totPtu > totPaygo ? "+" : "") + fmtPct((totPtu - totPaygo) / totPaygo) : "—"}</div>
+      <div class="detail">positive = PTU costs more</div></div>
+  </div>
+  <div style="margin-bottom:14px"><label>PTU billing basis:&nbsp;</label>
+    <select onchange="upd('ptuBilling',this.value)">
+      <option value="hourly" ${billing === "hourly" ? "selected" : ""}>Hourly (no reservation)</option>
+      <option value="monthly" ${billing === "monthly" ? "selected" : ""}>Monthly reservation</option>
+      <option value="yearly" ${billing === "yearly" ? "selected" : ""}>Yearly reservation (amortized)</option>
+    </select></div>
+
+  <h2>PTU deployment groups (per model + deployment type)</h2>
+  <div class="hint">Use cases sharing a model and PTU deployment type share one provisioned deployment. Sizing assumes coincident peaks (worst case): normalized TPM is summed per period, the peak period is divided by the model's Input TPM per PTU, then rounded up to the minimum/increment.</div>
+  <div class="scroll"><table>
+    <tr><th>Deployment group</th><th>Use cases</th><th>Peak raw TPM</th><th>Peak norm. TPM</th><th>Exact PTUs</th><th>PTUs to deploy</th>
+        <th>Utilization</th><th>PayGO $/mo</th><th>PTU hourly $/mo</th><th>PTU mo-resv $/mo</th><th>PTU yr-resv $/mo</th><th>Cheaper</th></tr>
+    ${grpRows}
+  </table></div>
+
+  <h2>Per use case</h2>
+  <div class="scroll"><table>
+    <tr><th>Use case</th><th>Model</th><th>Peak RPM</th><th>Peak input TPM</th><th>Peak output TPM</th><th>Peak total TPM</th>
+        <th>Peak norm. TPM</th><th>Input tok/mo</th><th>Output tok/mo</th><th>Cache</th><th>Exact PTUs (solo)</th><th>PayGO $/mo</th></tr>
+    ${ucRows}
+  </table></div>
+  ${perUcPeriod}
+
+  <div class="note">Method: PayGO $/mo = Σ periods [ fresh input × input rate + cached input × cached rate + output × output rate ] at the deployment-type multiplier.
+    PTU sizing: normalized TPM = input TPM × (1 − cache) + output TPM × output ratio; PTUs = peak normalized TPM ÷ input TPM per PTU, rounded to min/increment.
+    Utilization = normalized token-minutes used ÷ deployed capacity over ${fmtN(HOURS_PER_MONTH, 1)} h. Validate final numbers with the Foundry capacity calculator — real throughput varies with call shapes and burstiness.</div>`;
+}
+
+render();
+</script>
+</body>
+</html>
